@@ -1,148 +1,138 @@
 
 (function() {
 
-L.Control.Compass = L.Control.extend({
+  L.Control.Compass = L.Control.extend({
+    includes: L.Mixin.Events,
+    //
+    //Managed Events:
+    //	Event				Data passed		Description
+    //
+    //	compass_loaded		{angle}			fired after compass data is loaded
+    //	compass_activated					fired when compass is activated
+    //	compass_deactivated					fired when compass is deactivated
+    //
+    //Methods exposed:
+    //	Method 			Description
+    //
+    //  getAngle		return Azimut angle
+    //  activate		active tracking on runtime
+    //  deactivate		deactive tracking on runtime
+    //
+    options: {
+      autoActive: true, //activate control at startup
+      textErr: null, //error message on alert notification
+      callErr: null, //function that run on compass error activating
+      position: 'topright',
+      pluginOptions: {}
+              //TODO timeout autoActive
+    },
+    initialize: function(options) {
+      if (options && options.style)
+        options.style = L.Util.extend({}, this.options.style, options.style);
+      L.Util.setOptions(this, options);
+      this._errorFunc = this.options.callErr || this.showAlert;
+      this._isActive = false;//global state of compass
+      this._firstMoved = false;//global state of compass
+      this._currentAngle = null;	//store last angle
+    },
+    onAdd: function(map) {
+      console.log('COMPASS onAdd');
+      this._map = map;
 
-	includes: L.Mixin.Events, 
-	//
-	//Managed Events:
-	//	Event				Data passed		Description
-	//
-	//	compass_loaded		{angle}			fired after compass data is loaded
-	//	compass_activated					fired when compass is activated
-	//	compass_deactivated					fired when compass is deactivated
-	//
-	//Methods exposed:
-	//	Method 			Description
-	//
-	//  getAngle		return Azimut angle
-	//  activate		active tracking on runtime
-	//  deactivate		deactive tracking on runtime
-	//
-	options: {
-		autoActive: true,		//activate control at startup
-		textErr: null,			//error message on alert notification
-		callErr: null,			//function that run on compass error activating
-		position: 'topright'
-		//TODO timeout autoActive
-	},
+      var container = L.DomUtil.create('div', 'leaflet-compass');
 
-	initialize: function(options) {
-		if(options && options.style)
-			options.style = L.Util.extend({}, this.options.style, options.style); 
-		L.Util.setOptions(this, options);
-		this._errorFunc = this.options.callErr || this.showAlert;
-		this._isActive = false;//global state of compass
-		this._firstMoved = false;//global state of compass
-		this._currentAngle = null;	//store last angle
-	},
+      this._button = L.DomUtil.create('a', 'compass-button', container);
+      this._button.href = '#';
 
-	onAdd: function (map) {
+      this._divcompass = L.DomUtil.create('div', 'compass-icon', this._button);
+      this._divcompass.src = 'images/compass-icon.png';
+      //TODO change button from rotating image
 
-		this._map = map;	
-			
-		var container = L.DomUtil.create('div', 'leaflet-compass');
+      L.DomEvent
+              .on(this._button, 'click', L.DomEvent.stop, this)
+              .on(this._button, 'click', this._switchCompass, this);
 
-		this._button = L.DomUtil.create('a', 'compass-button', container);
-		this._button.href = '#';
+      this._alert = L.DomUtil.create('div', 'compass-alert', container);
+      this._alert.style.display = 'none';
 
-		this._divcompass = L.DomUtil.create('div', 'compass-icon', this._button);
-		this._divcompass.src = 'images/compass-icon.png';
-		//TODO change button from rotating image
+      this._map
+              .on('anglefound', this._rotateCompass, this)
+              .on('angleerror', this._errorCompass, this);
 
-		L.DomEvent
-			.on(this._button, 'click', L.DomEvent.stop, this)
-			.on(this._button, 'click', this._switchCompass, this);
+      if (this.options.autoActive)
+        this.activate();
 
-		this._alert = L.DomUtil.create('div', 'compass-alert', container);
-		this._alert.style.display = 'none';
+      return container;
+    },
+    onRemove: function(map) {
+      this.deactivate();
+    },
+    _switchCompass: function() {
+      if (this._isActive)
+        this.deactivate();
+      else
+        this.activate();
+    },
+    getAngle: function() {	//get last angle loaded
+      return this._currentAngle;
+    },
+    activate: function() {
+      this._isActive = true;
 
-		this._map
-			.on('anglefound', this._rotateCompass, this)
-			.on('angleerror', this._errorCompass, this);	
-			
-		if(this.options.autoActive)
-			this.activate();
+      this._divcompass.style.display = 'block';
 
-		return container;
-	},
+      //API DOC
+      //	http://goo.gl/5wfxN2
+      //
+      var self = this;
+      this.compassWatch = navigator.compass.watchHeading(function(e) {
+        self._rotateCompass(e.magneticHeading);
 
-	onRemove: function(map) {
-		this.deactivate();
-	},
+      }, this._errorCompass, this.options.pluginOptions);
 
-	_switchCompass: function() {
-		if(this._isActive)
-			this.deactivate();
-		else
-			this.activate();
-	},
-
-	getAngle: function() {	//get last angle loaded
-		return this._currentAngle;
-	},
-
-	activate: function() {
-		this._isActive = true;
-
-		this._divcompass.style.display = 'block';
-
-		//API DOC
-		//	http://goo.gl/5wfxN2
-		//
-		var self = this;
-		window.addEventListener('deviceorientation', function(e) {
-			
-			self._rotateCompass(e.webkitCompassHeading);
-
-		}, false);
-
-		this.fire('compass_activated');
-	},
-
-	_rotateCompass: function(angle) {
+      this.fire('compass_activated');
+    },
+    _rotateCompass: function(angle) {
 
 //L.DomUtil.get('copy').innerHTML = angle;
 
-		angle = 360 - angle;
+      angle = 360 - angle;
 
-		this._divcompass.style.webkitTransform = "rotate(" + angle + "deg)";
+      this._divcompass.style.webkitTransform = "rotate(" + angle + "deg)";
 
-		this._currentAngle = angle;
+      this._currentAngle = angle;
 
-		this.fire('compasslocated', {angle: angle});
-		
-		L.DomUtil.addClass(this._button, 'active');	
-	},
+      this.fire('compasslocated', {angle: angle});
 
-	_errorCompass: function(e) {
-		this.deactivate();
-		this._errorFunc.call(this, this.options.textErr || e.message);
-	},
+      L.DomUtil.addClass(this._button, 'active');
+    },
+    _errorCompass: function(e) {
+      console.error('COMPASS pluginResult: ' + JSON.stringify(e));
+      this.deactivate();
+      this._errorFunc.call(this, this.options.textErr || e.message);
+    },
+    deactivate: function() {
+      this._isActive = false;
+      this._firstMoved = false;
 
-	deactivate: function() {
-			this._isActive = false;    
-		this._firstMoved = false;
-		
-		//TODO STOP COMPASS ENGINE this._map.stopLocate();
+      //TODO STOP COMPASS ENGINE this._map.stopLocate();
+      navigator.compass.clearWatch(this.compassWatch);
+      L.DomUtil.removeClass(this._button, 'active');
+      this.fire('compass_deactivated');
+    },
+    showAlert: function(text) {
+      this._alert.style.display = 'block';
+      this._alert.innerHTML = text;
+      var that = this;
+      clearTimeout(this.timerAlert);
+      this.timerAlert = setTimeout(function() {
+        that._alert.style.display = 'none';
+      }, 2000);
+    }
+  });
 
-		L.DomUtil.removeClass(this._button, 'active');
-		this.fire('compass_deactivated');
-	},
-
-	showAlert: function(text) {
-		this._alert.style.display = 'block';
-		this._alert.innerHTML = text;
-		var that = this;
-		clearTimeout(this.timerAlert);
-		this.timerAlert = setTimeout(function() {
-			that._alert.style.display = 'none';
-		}, 2000);
-	}
-});
-
-L.control.compass = function (options) {
-	return new L.Control.Compass(options);
-};
+  L.control.compass = function(options) {
+    return new L.Control.Compass(options);
+  };
 
 }).call(this);
